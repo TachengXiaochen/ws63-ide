@@ -6,7 +6,7 @@
   "publisher": "local",
   "repository": {
     "type": "git",
-    "url": "https://github.com/OWNER/ws63-ide"
+    "url": "https://github.com/TachengXiaochen/ws63-ide"
   },
   "engines": {
     "vscode": "^1.85.0"

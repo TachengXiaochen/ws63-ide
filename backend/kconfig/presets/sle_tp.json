@@ -1,0 +1,23 @@
+{
+  "id": "sle_tp",
+  "title": "SLE Throughput App",
+  "symbols": [
+    {
+      "key": "SLE_TP_APP_ENABLE",
+      "label": "Enable SLE Throughput App",
+      "type": "bool"
+    },
+    {
+      "key": "SLE_TP_APP_SERVER",
+      "label": "Server (RX) — WS63 接收端",
+      "type": "bool",
+      "dependsOn": "SLE_TP_APP_ENABLE"
+    },
+    {
+      "key": "SLE_TP_APP_CLIENT",
+      "label": "Client (TX) — 反向测试",
+      "type": "bool",
+      "dependsOn": "SLE_TP_APP_ENABLE"
+    }
+  ]
+}

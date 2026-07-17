@@ -1,0 +1,11 @@
+{
+  "default_port": "",
+  "default_baud": 115200,
+  "flash_baud": 921600,
+  "default_target": "ws63-liteos-app",
+  "sdk_path": "",
+  "firmware_rel": "output/ws63/fwpkg/ws63-liteos-app/ws63-liteos-app_all.fwpkg",
+  "win_python": "",
+  "wsl_distro": "Ubuntu",
+  "burntool": ""
+}

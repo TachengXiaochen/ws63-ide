@@ -1,0 +1,12 @@
+node_modules/**
+.vscode/**
+src/**
+scripts/**
+.gitignore
+tsconfig.json
+**/*.map
+**/*.ts
+*.vsix
+backend/**/__pycache__/**
+backend/**/*.pyc
+backend/kconfig/export/**

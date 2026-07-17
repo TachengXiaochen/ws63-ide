@@ -1,0 +1,6 @@
+node_modules/
+out/
+backend/
+third_party/
+*.vsix
+.vscode-test/

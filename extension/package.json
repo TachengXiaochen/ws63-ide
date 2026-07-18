@@ -2,18 +2,20 @@
   "name": "ws63-ide",
   "displayName": "WS63 IDE",
   "description": "WS63 (Hi3863) build, flash, and serial monitor — ESP-IDF style workflow",
-  "version": "0.5.2",
+  "version": "0.6.1",
   "publisher": "local",
   "repository": {
     "type": "git",
     "url": "https://github.com/TachengXiaochen/ws63-ide"
   },
+  "homepage": "https://github.com/TachengXiaochen/ws63-ide",
+  "bugs": {
+    "url": "https://github.com/TachengXiaochen/ws63-ide/issues"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": [
-    "Other"
-  ],
+  "categories": ["Other"],
   "activationEvents": [
     "onStartupFinished",
     "workspaceContains:build.py"
@@ -21,113 +23,27 @@
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-      {
-        "command": "ws63.build",
-        "title": "WS63: Build (Clean)",
-        "category": "WS63",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "ws63.buildIncremental",
-        "title": "WS63: Build (Incremental)",
-        "category": "WS63",
-        "icon": "$(tools)"
-      },
-      {
-        "command": "ws63.cleanOutput",
-        "title": "WS63: Clean Output",
-        "category": "WS63",
-        "icon": "$(clear-all)"
-      },
-      {
-        "command": "ws63.flash",
-        "title": "WS63: Flash",
-        "category": "WS63",
-        "icon": "$(zap)"
-      },
-      {
-        "command": "ws63.monitor",
-        "title": "WS63: Monitor",
-        "category": "WS63",
-        "icon": "$(output)"
-      },
-      {
-        "command": "ws63.debugConsole",
-        "title": "WS63: Debug Console",
-        "category": "WS63",
-        "icon": "$(debug-console)"
-      },
-      {
-        "command": "ws63.sendSerial",
-        "title": "WS63: Send Serial Command",
-        "category": "WS63",
-        "icon": "$(arrow-right)"
-      },
-      {
-        "command": "ws63.sdkConfig",
-        "title": "WS63: SDK Configuration Editor",
-        "category": "WS63",
-        "icon": "$(settings-gear)"
-      },
-      {
-        "command": "ws63.quickConfig",
-        "title": "WS63: Quick Config (SLE)",
-        "category": "WS63",
-        "icon": "$(list-selection)"
-      },
-      {
-        "command": "ws63.newProject",
-        "title": "WS63: New Application",
-        "category": "WS63",
-        "icon": "$(add)"
-      },
-      {
-        "command": "ws63.menuconfig",
-        "title": "WS63: Menuconfig (Terminal)",
-        "category": "WS63",
-        "icon": "$(list-tree)"
-      },
-      {
-        "command": "ws63.selectPort",
-        "title": "WS63: Select Port",
-        "category": "WS63",
-        "icon": "$(plug)"
-      },
-      {
-        "command": "ws63.openSettings",
-        "title": "WS63: Settings",
-        "category": "WS63",
-        "icon": "$(gear)"
-      },
-      {
-        "command": "ws63.doctor",
-        "title": "WS63: Doctor",
-        "category": "WS63",
-        "icon": "$(heart)"
-      },
-      {
-        "command": "ws63.setup",
-        "title": "WS63: Setup Wizard",
-        "category": "WS63",
-        "icon": "$(rocket)"
-      },
-      {
-        "command": "ws63.buildFlashMonitor",
-        "title": "WS63: Build + Flash + Monitor",
-        "category": "WS63",
-        "icon": "$(flame)"
-      },
-      {
-        "command": "ws63.stop",
-        "title": "WS63: Stop Build/Flash",
-        "category": "WS63",
-        "icon": "$(debug-stop)"
-      },
-      {
-        "command": "ws63.refreshSidebar",
-        "title": "Refresh",
-        "icon": "$(refresh)"
-      }
+      { "command": "ws63.build", "title": "WS63: Build (Clean)", "category": "WS63", "icon": "$(refresh)" },
+      { "command": "ws63.buildIncremental", "title": "WS63: Build (Incremental)", "category": "WS63", "icon": "$(tools)" },
+      { "command": "ws63.cleanOutput", "title": "WS63: Clean Output", "category": "WS63", "icon": "$(clear-all)" },
+      { "command": "ws63.flash", "title": "WS63: Flash", "category": "WS63", "icon": "$(zap)" },
+      { "command": "ws63.flashMulti", "title": "WS63: Multi Flash", "category": "WS63", "icon": "$(zap)" },
+      { "command": "ws63.monitor", "title": "WS63: Monitor", "category": "WS63", "icon": "$(output)" },
+      { "command": "ws63.monitorMulti", "title": "WS63: Multi Monitor", "category": "WS63", "icon": "$(output)" },
+      { "command": "ws63.debugConsole", "title": "WS63: Debug Console", "category": "WS63", "icon": "$(debug-console)" },
+      { "command": "ws63.sendSerial", "title": "WS63: Send Serial Command", "category": "WS63", "icon": "$(arrow-right)" },
+      { "command": "ws63.sdkConfig", "title": "WS63: SDK Configuration Editor", "category": "WS63", "icon": "$(settings-gear)" },
+      { "command": "ws63.quickConfig", "title": "WS63: Quick Config (SLE)", "category": "WS63", "icon": "$(list-selection)" },
+      { "command": "ws63.newProject", "title": "WS63: New Application", "category": "WS63", "icon": "$(add)" },
+      { "command": "ws63.menuconfig", "title": "WS63: Menuconfig (Terminal)", "category": "WS63", "icon": "$(list-tree)" },
+      { "command": "ws63.selectPort", "title": "WS63: Select Port", "category": "WS63", "icon": "$(plug)" },
+      { "command": "ws63.selectTarget", "title": "WS63: Select Target", "category": "WS63", "icon": "$(target)" },
+      { "command": "ws63.openSettings", "title": "WS63: Settings", "category": "WS63", "icon": "$(gear)" },
+      { "command": "ws63.doctor", "title": "WS63: Doctor", "category": "WS63", "icon": "$(heart)" },
+      { "command": "ws63.setup", "title": "WS63: Setup Wizard", "category": "WS63", "icon": "$(rocket)" },
+      { "command": "ws63.buildFlashMonitor", "title": "WS63: Build + Flash + Monitor", "category": "WS63", "icon": "$(flame)" },
+      { "command": "ws63.stop", "title": "WS63: Stop", "category": "WS63", "icon": "$(debug-stop)" },
+      { "command": "ws63.refreshSidebar", "title": "Refresh", "icon": "$(refresh)" }
     ],
     "views": {
       "ws63": [
@@ -160,6 +76,21 @@
         }
       ]
     },
+    "problemMatchers": [
+      {
+        "name": "ws63-gcc",
+        "owner": "ws63",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(.*):(\\d+):(\\d+):\\s+(fatal error|error|warning|note):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      }
+    ],
     "configuration": {
       "title": "WS63 IDE",
       "properties": {
@@ -175,7 +106,7 @@
         "ws63.port": {
           "type": "string",
           "default": "",
-          "description": "Serial port (Windows COMx or Linux /dev/ttyUSB*). Use Select Port — do not guess COM19 on Ubuntu."
+          "description": "Default serial port (Windows COMx or Linux /dev/ttyUSB*). Use Select Port."
         },
         "ws63.monitorBaud": {
           "type": "number",
@@ -190,9 +121,28 @@
           "default": 120,
           "description": "Flash timeout in seconds (0 = no limit). Stop button always works."
         },
+        "ws63.flashRetries": {
+          "type": "number",
+          "default": 1,
+          "description": "Auto-retry count on RESET_TIMEOUT / PORT_BUSY / UNKNOWN flash failures."
+        },
         "ws63.firmwareRel": {
           "type": "string",
           "default": "output/ws63/fwpkg/ws63-liteos-app/ws63-liteos-app_all.fwpkg"
+        },
+        "ws63.flashJobs": {
+          "type": "array",
+          "default": [],
+          "description": "Preset multi-flash jobs: [{ port, firmwareRel, label? }]",
+          "items": {
+            "type": "object",
+            "properties": {
+              "port": { "type": "string" },
+              "firmwareRel": { "type": "string" },
+              "label": { "type": "string" }
+            },
+            "required": ["port"]
+          }
         },
         "ws63.backendPath": {
           "type": "string",
@@ -222,6 +172,5 @@
     "@types/vscode": "^1.85.0",
     "typescript": "^5.3.0",
     "@vscode/vsce": "^2.22.0"
-  },
-  "license": "MIT"
+  }
 }

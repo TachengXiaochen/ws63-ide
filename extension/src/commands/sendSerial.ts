@@ -1,16 +1,14 @@
 import * as vscode from "vscode";
-import { cliPath, getSettings } from "../settings";
-import { runCaptured } from "../executor/shell";
+import { getSettings } from "../settings";
 import { portLock } from "../diagnose/portLock";
 import { preflightSerial } from "../diagnose/runner";
-import { hintForCode } from "../diagnose/types";
+import { offerRecovery } from "../diagnose/recover";
+import { backendClient } from "../host/backendClient";
 
 export async function runSendSerial(): Promise<void> {
   const pre = await preflightSerial();
   if (!pre.ok) {
-    vscode.window.showErrorMessage(
-      `WS63 Send blocked: ${pre.message}. ${pre.fix || hintForCode(pre.code)}`
-    );
+    await offerRecovery(pre.code, "Send blocked", pre.message);
     return;
   }
 
@@ -30,22 +28,23 @@ export async function runSendSerial(): Promise<void> {
   }
 
   try {
-    const quoted = `'${text.replace(/'/g, `'\\''`)}'`;
-    const cli = `'${cliPath(s).replace(/'/g, `'\\''`)}'`;
-    const cmd = `python3 ${cli} write -p ${s.port} -b ${s.monitorBaud} ${quoted}`;
-    const result = await runCaptured(cmd);
+    const result = await backendClient.write(s.port, text);
     if (result.code === 0) {
       vscode.window.showInformationMessage(`WS63: sent to ${s.port}: ${text}`);
     } else {
       const err = result.stderr || result.stdout || "unknown error";
       const busy = /PermissionError|busy|Access is denied/i.test(err);
-      vscode.window.showErrorMessage(
-        busy
-          ? `WS63: port busy — ${hintForCode("PORT_BUSY")}`
-          : `WS63: send failed — ${err}`
+      const again = await offerRecovery(
+        busy ? "PORT_BUSY" : "UNKNOWN",
+        "Send failed",
+        err.slice(0, 200)
       );
+      if (again === "retry") {
+        await portLock.releasePort(s.port, false);
+        return runSendSerial();
+      }
     }
   } finally {
-    await portLock.release(false);
+    await portLock.releasePort(s.port, false);
   }
 }

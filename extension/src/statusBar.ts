@@ -30,7 +30,8 @@ export function registerStatusBar(context: vscode.ExtensionContext): void {
 
   const target = barItem(vscode.StatusBarAlignment.Left, 99, IconColors.blue);
   target.text = `${SB.target} ${s.target}`;
-  target.tooltip = "Build target";
+  target.tooltip = "Click to select build target";
+  target.command = "ws63.selectTarget";
   target.show();
 
   const port = barItem(vscode.StatusBarAlignment.Left, 98, IconColors.yellow);
@@ -41,7 +42,7 @@ export function registerStatusBar(context: vscode.ExtensionContext): void {
 
   stopItem = barItem(vscode.StatusBarAlignment.Right, 95, IconColors.red);
   stopItem.text = `${SB.stop} Stop`;
-  stopItem.tooltip = "Stop running Build/Flash";
+  stopItem.tooltip = "Stop Build/Flash and Monitor/Debug sessions";
   stopItem.command = "ws63.stop";
   stopItem.show();
 

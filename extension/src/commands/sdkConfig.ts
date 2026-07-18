@@ -1,16 +1,17 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import { runBuild } from "./build";
-import { runCaptured } from "../executor/shell";
 import { ConfserverProcess, disposeConfserver, getConfserver } from "../confserver/process";
-import { cliPath, getSettings } from "../settings";
+import { getSettings } from "../settings";
+import { backendClient } from "../host/backendClient";
 
 interface MenuNode {
   id: string;
-  kind: "menu" | "config";
+  kind: "menu" | "config" | "choice";
   type?: string;
   title: string;
   help?: string;
+  members?: string[];
   children?: MenuNode[];
 }
 
@@ -66,7 +67,9 @@ function renderHtml(target: string): string {
   .warn { color: var(--vscode-editorWarning-foreground, #cca700); }
   .err { color: var(--vscode-errorForeground, #f14c4c); }
   #help { white-space:pre-wrap; font-size:12px; color:var(--vscode-descriptionForeground); margin-top:12px; line-height:1.5; }
-  input[type=text], input[type=number] { padding:4px 8px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border,transparent); border-radius:4px; }
+  .cfg.dirty .cfg-title { font-weight:600; color: var(--vscode-charts-orange, #e2a03f); }
+  .choice-radios label { display:block; margin:6px 0; cursor:pointer; }
+  input[type=text], input[type=number], select { padding:4px 8px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border,transparent); border-radius:4px; }
 </style>
 </head>
 <body>
@@ -113,16 +116,28 @@ function renderHtml(target: string): string {
     return (node.children || []).some(c => nodeMatchesTree(c, q));
   }
 
+  function selectedChoiceMember(n) {
+    const members = n.members || [];
+    for (const m of members) {
+      if (values[m] === true || values[m] === 'y') return m;
+    }
+    return members[0] || '';
+  }
+
   function renderCfgRow(n) {
     const val = values[n.id];
     const checked = val === true || val === 'y';
     let control = '';
-    if (n.type === 'bool') {
+    let dirtyClass = '';
+    if (n.kind === 'choice' || n.type === 'choice') {
+      const sel = selectedChoiceMember(n);
+      control = '<span class="cfg-id">' + escHtml(sel || '—') + '</span>';
+    } else if (n.type === 'bool' || n.type === 'tristate') {
       control = '<input type="checkbox" data-id="' + escHtml(n.id) + '" ' + (checked ? 'checked' : '') + ' />';
     } else {
       control = '<span class="cfg-id">' + escHtml(String(val ?? '')) + '</span>';
     }
-    return '<div class="cfg' + (selectedId === n.id ? ' selected' : '') + '" data-select="' + escHtml(n.id) + '">' +
+    return '<div class="cfg' + (selectedId === n.id ? ' selected' : '') + dirtyClass + '" data-select="' + escHtml(n.id) + '">' +
       control + '<span class="cfg-title">' + escHtml(n.title) + '</span></div>';
   }
 
@@ -133,6 +148,12 @@ function renderHtml(target: string): string {
         const childHtml = renderTreeNodes(n.children || [], q);
         if (!childHtml && q) continue;
         html += '<div class="menu open"><div class="label">' + escHtml(n.title) + '</div><div class="menu-children">' + childHtml + '</div></div>';
+      } else if (n.kind === 'choice' || n.type === 'choice') {
+        if (q && !nodeMatchesTree(n, q)) continue;
+        html += '<div class="cfg-group">' + renderCfgRow(n);
+        const childHtml = renderTreeNodes(n.children || [], q);
+        if (childHtml) html += '<div class="cfg-children">' + childHtml + '</div>';
+        html += '</div>';
       } else if (n.kind === 'config') {
         const childHtml = (n.children && n.children.length) ? renderTreeNodes(n.children, q) : '';
         const selfVisible = isVisible(n.id);
@@ -200,8 +221,16 @@ function renderHtml(target: string): string {
     if (!n) return;
     const val = values[selectedId];
     let editor = '';
-    if (n.type === 'bool') {
-      editor = '<label><input type="checkbox" id="detail-bool" ' + (val === true ? 'checked' : '') + ' /> Enabled</label>';
+    if (n.kind === 'choice' || n.type === 'choice') {
+      const sel = selectedChoiceMember(n);
+      editor = '<div class="choice-radios">';
+      for (const m of (n.members || [])) {
+        editor += '<label><input type="radio" name="choice-' + escHtml(n.id) + '" data-member="' + escHtml(m) + '" ' +
+          (m === sel ? 'checked' : '') + ' /> ' + escHtml(m) + '</label>';
+      }
+      editor += '</div>';
+    } else if (n.type === 'bool' || n.type === 'tristate') {
+      editor = '<label><input type="checkbox" id="detail-bool" ' + (val === true || val === 'y' ? 'checked' : '') + ' /> Enabled</label>';
     } else if (n.type === 'int' || n.type === 'hex') {
       editor = '<input type="number" id="detail-num" value="' + escHtml(String(val ?? 0)) + '" />';
     } else if (n.type === 'string') {
@@ -210,15 +239,29 @@ function renderHtml(target: string): string {
       editor = '<code>' + escHtml(String(val ?? '')) + '</code>';
     }
     box.innerHTML = '<h3 style="margin:0 0 6px;font-size:14px;">' + escHtml(n.title) + '</h3>' +
-      '<div class="cfg-id">' + escHtml(n.id) + ' · ' + escHtml(n.type || '') + '</div>' +
+      '<div class="cfg-id">' + escHtml(n.id) + ' · ' + escHtml(n.type || n.kind || '') + '</div>' +
       '<div style="margin-top:12px">' + editor + '</div>' +
-      '<div id="help">' + escHtml(n.help || '') + '</div>';
+      '<div id="help">' + escHtml(n.help || '') + '</div>' +
+      (dirty ? '<p class="warn" style="margin-top:8px">Unsaved changes</p>' : '');
     const db = document.getElementById('detail-bool');
     if (db) db.onchange = () => { values[selectedId]=db.checked; dirty=true; vscode.postMessage({ type:'set', id:selectedId, value:db.checked }); render(); };
     const dn = document.getElementById('detail-num');
     if (dn) dn.onchange = () => { values[selectedId]=Number(dn.value); dirty=true; vscode.postMessage({ type:'set', id:selectedId, value:Number(dn.value) }); };
     const ds = document.getElementById('detail-str');
     if (ds) ds.onchange = () => { values[selectedId]=ds.value; dirty=true; vscode.postMessage({ type:'set', id:selectedId, value:ds.value }); };
+    box.querySelectorAll('input[data-member]').forEach(el => {
+      el.onchange = () => {
+        if (!el.checked) return;
+        const member = el.getAttribute('data-member');
+        dirty = true;
+        vscode.postMessage({ type: 'set', id: member, value: true });
+        values[member] = true;
+        for (const m of (n.members || [])) {
+          if (m !== member) values[m] = false;
+        }
+        render();
+      };
+    });
   }
 
   document.getElementById('search').oninput = () => render();
@@ -242,6 +285,9 @@ function renderHtml(target: string): string {
     if (m.type === 'status') document.getElementById('msg').textContent = m.text || '';
     if (m.type === 'warn') document.getElementById('msg').innerHTML = '<span class="warn">' + escHtml(m.text) + '</span>';
     if (m.type === 'error') document.getElementById('msg').innerHTML = '<span class="err">' + escHtml(m.text) + '</span>';
+    if (m.type === 'restarted') {
+      document.getElementById('msg').innerHTML = '<span class="warn">Confserver restarted — retry your change if needed</span>';
+    }
   });
 </script>
 </body>
@@ -249,9 +295,7 @@ function renderHtml(target: string): string {
 }
 
 async function exportMenusPath(): Promise<string> {
-  const s = getSettings();
-  const cmd = `python3 ${cliPath(s)} export-menus --target ${s.target} --chip ws63 --core acore --sdk ${s.sdkPath}`;
-  const r = await runCaptured(cmd);
+  const r = await backendClient.exportMenus();
   if (r.code !== 0) {
     throw new Error(r.stderr || r.stdout || "export-menus failed");
   }
@@ -266,6 +310,8 @@ async function loadMenus(path: string): Promise<MenusFile> {
 async function ensureServer(): Promise<ConfserverProcess> {
   if (!server) {
     server = getConfserver();
+  }
+  if (!server.alive) {
     await server.start();
   }
   return server;
@@ -329,7 +375,13 @@ export async function runSdkConfig(): Promise<void> {
     try {
       if (msg.type === "set") {
         const srv = await ensureServer();
-        const resp = await srv.request({ set: { [msg.id]: msg.value } });
+        let resp;
+        try {
+          resp = await srv.request({ set: { [msg.id]: msg.value } });
+        } catch (err) {
+          panel.webview.postMessage({ type: "restarted" });
+          resp = await (await ensureServer()).request({ set: { [msg.id]: msg.value } });
+        }
         if (resp.error?.length) {
           panel.webview.postMessage({ type: "warn", text: resp.error.join("; ") });
         }

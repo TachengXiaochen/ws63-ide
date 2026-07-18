@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
-import { runCaptured } from "../executor/shell";
-import { cliPath, getSettings } from "../settings";
+import { backendClient } from "../host/backendClient";
+import { getSettings } from "../settings";
 import { ConfigProvider, KconfigNode } from "./configProvider";
 
 /** Quick Config symbols (Phase 2 — sle_tp group). */
@@ -15,18 +15,12 @@ interface GetConfigResponse {
   target?: string;
 }
 
-function configBaseArgs(s: ReturnType<typeof getSettings>): string {
-  return `--target ${s.target} --chip ws63 --core acore --sdk ${s.sdkPath}`;
-}
-
 export class FileConfigProvider implements ConfigProvider {
   private values: Record<string, boolean> = {};
 
   async loadTree(): Promise<KconfigNode[]> {
-    const s = getSettings();
-    const keys = QUICK_CONFIG_SYMBOLS.map((x) => x.id).join(",");
-    const cmd = `python3 ${cliPath(s)} getconfig --keys ${keys} ${configBaseArgs(s)}`;
-    const result = await runCaptured(cmd);
+    const keys = QUICK_CONFIG_SYMBOLS.map((x) => x.id);
+    const result = await backendClient.getconfig(keys);
     if (result.code !== 0) {
       throw new Error(result.stderr || "getconfig failed");
     }
@@ -51,12 +45,10 @@ export class FileConfigProvider implements ConfigProvider {
   }
 
   async save(): Promise<void> {
-    const s = getSettings();
     const parts = QUICK_CONFIG_SYMBOLS.map(
       (sym) => `${sym.id}=${this.values[sym.id] ? "y" : "n"}`
     );
-    const cmd = `python3 ${cliPath(s)} setconfig ${parts.join(" ")} --save ${configBaseArgs(s)}`;
-    const result = await runCaptured(cmd);
+    const result = await backendClient.setconfig(parts, true);
     if (result.code !== 0) {
       throw new Error(result.stderr || result.stdout || "setconfig failed");
     }

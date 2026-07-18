@@ -1,27 +1,14 @@
-import { ChildProcess, spawn } from "child_process";
+/**
+ * Streaming process runner — argv only via HostAdapter.
+ */
+import { ChildProcess } from "child_process";
 import * as vscode from "vscode";
-import { getSettings } from "../settings";
-import { isRemoteShell } from "./shell";
+import { SpawnSpec, spawnArgv } from "../host/adapter";
 
-let activeProc: ChildProcess | null = null;
+const activeProcs = new Set<ChildProcess>();
 
 export async function setTaskRunning(running: boolean): Promise<void> {
   await vscode.commands.executeCommand("setContext", "ws63.taskRunning", running);
-}
-
-function spawnCommand(command: string, cwd?: string): ChildProcess {
-  const env = { ...process.env, PYTHONUNBUFFERED: "1" };
-  const opts = {
-    cwd,
-    env,
-    detached: true,
-    stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"],
-  };
-  if (isRemoteShell()) {
-    return spawn("bash", ["-lc", command], opts);
-  }
-  const settings = getSettings();
-  return spawn("wsl", ["-d", settings.wslDistro, "bash", "-lc", command], opts);
 }
 
 function killTree(proc: ChildProcess): void {
@@ -53,20 +40,20 @@ function killTree(proc: ChildProcess): void {
   }, 1500);
 }
 
-/** Kill the active build/flash process tree. Returns true if something was running. */
 export function cancelActiveTask(): boolean {
-  if (!activeProc) {
+  if (!activeProcs.size) {
     return false;
   }
-  const proc = activeProc;
-  activeProc = null;
-  killTree(proc);
+  for (const proc of [...activeProcs]) {
+    killTree(proc);
+  }
+  activeProcs.clear();
   void setTaskRunning(false);
   return true;
 }
 
 export function isTaskRunning(): boolean {
-  return activeProc !== null;
+  return activeProcs.size > 0;
 }
 
 export interface StreamResult {
@@ -77,10 +64,8 @@ export interface StreamResult {
 }
 
 export interface StreamOptions {
-  cwd?: string;
   onLine?: (line: string, stream: "stdout" | "stderr") => void;
   token?: vscode.CancellationToken;
-  /** When true, ignore progress-notification cancel (e.g. flash already succeeded). */
   ignoreCancel?: () => boolean;
 }
 
@@ -100,18 +85,26 @@ function drainLines(
   }
 }
 
-/** Run command with streaming output; supports cancellation via token or ws63.stop. */
-export function runStreaming(command: string, options: StreamOptions = {}): Promise<StreamResult> {
+/** Preferred: spawn from argv spec (no shell string). */
+export function runStreamingSpec(
+  spec: SpawnSpec,
+  options: StreamOptions = {}
+): Promise<StreamResult> {
   return new Promise((resolve) => {
     const stdoutAcc: string[] = [];
     const stderrAcc: string[] = [];
     const stdoutBuf = { value: "" };
     const stderrBuf = { value: "" };
     let cancelled = false;
+    let settled = false;
 
     const finish = (code: number) => {
-      activeProc = null;
-      void setTaskRunning(false);
+      if (settled) {
+        return;
+      }
+      settled = true;
+      activeProcs.delete(proc);
+      void setTaskRunning(activeProcs.size > 0);
       resolve({
         code: cancelled ? 130 : code,
         stdout: stdoutAcc.join("\n"),
@@ -120,8 +113,8 @@ export function runStreaming(command: string, options: StreamOptions = {}): Prom
       });
     };
 
-    const proc = spawnCommand(command, options.cwd);
-    activeProc = proc;
+    const proc = spawnArgv(spec);
+    activeProcs.add(proc);
     void setTaskRunning(true);
 
     const onCancel = () => {
@@ -162,4 +155,21 @@ export function runStreaming(command: string, options: StreamOptions = {}): Prom
       finish(1);
     });
   });
+}
+
+/**
+ * @deprecated Prefer runStreamingSpec(SpawnSpec). Kept for transitional callers.
+ */
+export function runStreaming(
+  command: string,
+  options: StreamOptions & { cwd?: string } = {}
+): Promise<StreamResult> {
+  return runStreamingSpec(
+    {
+      file: "bash",
+      args: ["-lc", command],
+      cwd: options.cwd,
+    },
+    options
+  );
 }

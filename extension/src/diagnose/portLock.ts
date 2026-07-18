@@ -2,43 +2,66 @@ import * as vscode from "vscode";
 
 export type PortOwner = "monitor" | "debug" | "flash" | "send";
 
-interface LockState {
+export interface LockState {
   owner: PortOwner;
   port: string;
   terminal?: vscode.Terminal;
 }
 
 /**
- * Exclusive COM-port ownership inside the extension.
- * External tools (SSCOM/BurnTool) cannot be forced closed — we only coordinate our own sessions.
+ * Per-port COM ownership inside the extension.
+ * Different ports can be held simultaneously (multi Monitor / Flash).
+ * External tools (SSCOM/BurnTool) cannot be forced closed.
  */
 class PortLock {
-  private state: LockState | undefined;
+  /** key = normalized port string */
+  private locks = new Map<string, LockState>();
   private disposable: vscode.Disposable | undefined;
 
   init(context: vscode.ExtensionContext): void {
     this.disposable = vscode.window.onDidCloseTerminal((t) => {
-      if (this.state?.terminal === t) {
-        this.state = undefined;
+      for (const [port, state] of this.locks) {
+        if (state.terminal === t) {
+          this.locks.delete(port);
+        }
       }
     });
     context.subscriptions.push(this.disposable);
   }
 
-  current(): LockState | undefined {
-    return this.state;
+  normalize(port: string): string {
+    return port.trim().toUpperCase();
   }
 
-  isHeldBy(owner: PortOwner): boolean {
-    return this.state?.owner === owner;
+  current(port?: string): LockState | undefined {
+    if (port) {
+      return this.locks.get(this.normalize(port));
+    }
+    const first = this.locks.values().next();
+    return first.done ? undefined : first.value;
   }
 
-  /** Returns false if user cancelled releasing another owner. */
+  listActive(): LockState[] {
+    return [...this.locks.values()];
+  }
+
+  isHeldBy(owner: PortOwner, port?: string): boolean {
+    if (port) {
+      return this.locks.get(this.normalize(port))?.owner === owner;
+    }
+    return [...this.locks.values()].some((s) => s.owner === owner);
+  }
+
+  /**
+   * Acquire port for owner. Conflict only when the *same* port is held by a different owner
+   * (or by same owner with a live terminal we must replace).
+   */
   async acquire(owner: PortOwner, port: string, terminal?: vscode.Terminal): Promise<boolean> {
-    if (this.state && this.state.owner !== owner) {
-      const other = this.state.owner;
+    const key = this.normalize(port);
+    const existing = this.locks.get(key);
+    if (existing && existing.owner !== owner) {
       const choice = await vscode.window.showWarningMessage(
-        `COM ${this.state.port} is used by WS63 ${label(other)}. Stop it and continue?`,
+        `${port} is used by WS63 ${label(existing.owner)}. Stop it and continue?`,
         { modal: true },
         "Stop & Continue",
         "Cancel"
@@ -46,24 +69,30 @@ class PortLock {
       if (choice !== "Stop & Continue") {
         return false;
       }
-      await this.release(true);
-    } else if (this.state && this.state.owner === owner && this.state.port !== port) {
-      await this.release(true);
+      await this.releasePort(port, true);
+    } else if (existing && existing.owner === owner) {
+      // Reuse / replace same-owner session on this port
+      await this.releasePort(port, true);
     }
 
-    this.state = { owner, port, terminal };
+    this.locks.set(key, { owner, port, terminal });
     return true;
   }
 
-  /** Soft acquire for flash: stop monitor/debug if needed. */
   async acquireForFlash(port: string): Promise<boolean> {
     return this.acquire("flash", port);
   }
 
-  async release(disposeTerminal = false): Promise<void> {
-    const cur = this.state;
-    this.state = undefined;
+  async releasePort(port: string, disposeTerminal = false): Promise<void> {
+    const key = this.normalize(port);
+    const cur = this.locks.get(key);
+    this.locks.delete(key);
     if (disposeTerminal && cur?.terminal) {
+      try {
+        cur.terminal.sendText("\x03", false);
+      } catch {
+        /* ignore */
+      }
       try {
         cur.terminal.dispose();
       } catch {
@@ -72,9 +101,40 @@ class PortLock {
     }
   }
 
-  bindTerminal(owner: PortOwner, terminal: vscode.Terminal): void {
-    if (this.state?.owner === owner) {
-      this.state.terminal = terminal;
+  /** @deprecated use releasePort — releases all flash locks or a single current if port omitted */
+  async release(disposeTerminal = false): Promise<void> {
+    const ports = [...this.locks.keys()];
+    for (const p of ports) {
+      const st = this.locks.get(p);
+      if (st?.owner === "flash" || st?.owner === "send") {
+        await this.releasePort(st.port, disposeTerminal);
+      }
+    }
+  }
+
+  async releaseAll(disposeTerminal = false): Promise<void> {
+    const ports = [...this.locks.values()].map((s) => s.port);
+    for (const p of ports) {
+      await this.releasePort(p, disposeTerminal);
+    }
+  }
+
+  async stopOwner(owner: PortOwner): Promise<number> {
+    let n = 0;
+    for (const st of [...this.locks.values()]) {
+      if (st.owner === owner) {
+        await this.releasePort(st.port, true);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  bindTerminal(owner: PortOwner, port: string, terminal: vscode.Terminal): void {
+    const key = this.normalize(port);
+    const st = this.locks.get(key);
+    if (st?.owner === owner) {
+      st.terminal = terminal;
     }
   }
 }

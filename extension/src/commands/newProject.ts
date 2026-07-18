@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { runBuild } from "./build";
-import { runCaptured } from "../executor/shell";
-import { getSettings, projectCliPath } from "../settings";
+import { getSettings } from "../settings";
+import { backendClient } from "../host/backendClient";
 
 let panel: vscode.WebviewPanel | undefined;
 
@@ -21,10 +21,6 @@ interface WizardResult {
 }
 
 const NAME_RE = /^[a-z][a-z0-9_]{2,31}$/;
-
-function shellArg(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
 function parseWizardJson(output: string): WizardResult {
   const start = output.indexOf("{");
@@ -203,8 +199,7 @@ function renderHtml(target: string, templates: string[]): string {
 }
 
 async function listTemplates(): Promise<string[]> {
-  const s = getSettings();
-  const r = await runCaptured(`python3 ${projectCliPath(s)} list-templates`);
+  const r = await backendClient.project(["list-templates"]);
   if (r.code !== 0) {
     throw new Error(r.stderr || r.stdout || "list-templates failed");
   }
@@ -216,10 +211,11 @@ async function listTemplates(): Promise<string[]> {
 
 async function runDryRun(name: string, template: string, target: string, title?: string): Promise<WizardResult> {
   validateNameOrThrow(name);
-  const s = getSettings();
-  const titleArg = title ? ` --title ${shellArg(title)}` : "";
-  const cmd = `python3 ${projectCliPath(s)} create ${shellArg(name)} --template ${shellArg(template)} --target ${shellArg(target)}${titleArg} --dry-run`;
-  const r = await runCaptured(cmd);
+  const args = ["create", name, "--template", template, "--target", target, "--dry-run"];
+  if (title) {
+    args.push("--title", title);
+  }
+  const r = await backendClient.project(args);
   if (r.code !== 0) {
     throw new Error(r.stderr || r.stdout || "dry-run failed");
   }
@@ -233,10 +229,19 @@ async function runCreate(
   title?: string
 ): Promise<WizardResult> {
   validateNameOrThrow(name);
-  const s = getSettings();
-  const titleArg = title ? ` --title ${shellArg(title)}` : "";
-  const cmd = `python3 ${projectCliPath(s)} create ${shellArg(name)} --template ${shellArg(template)} --target ${shellArg(target)}${titleArg} --enable-config`;
-  const r = await runCaptured(cmd);
+  const args = [
+    "create",
+    name,
+    "--template",
+    template,
+    "--target",
+    target,
+    "--enable-config",
+  ];
+  if (title) {
+    args.push("--title", title);
+  }
+  const r = await backendClient.project(args);
   const combined = r.stdout + r.stderr;
   if (r.code !== 0 && !combined.includes('"created_files"')) {
     throw new Error(r.stderr || r.stdout || "create failed");

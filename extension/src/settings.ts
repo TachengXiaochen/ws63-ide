@@ -9,6 +9,7 @@ export interface Ws63Settings {
   monitorBaud: number;
   flashBaud: number;
   flashTimeout: number;
+  flashRetries: number;
   firmwareRel: string;
   backendPath: string;
   wslDistro: string;
@@ -31,6 +32,7 @@ export function getSettings(): Ws63Settings {
     monitorBaud: cfg.get<number>("monitorBaud", 115200),
     flashBaud: cfg.get<number>("flashBaud", 921600),
     flashTimeout: cfg.get<number>("flashTimeout", 120),
+    flashRetries: cfg.get<number>("flashRetries", 1),
     firmwareRel: cfg.get<string>(
       "firmwareRel",
       "output/ws63/fwpkg/ws63-liteos-app/ws63-liteos-app_all.fwpkg"
@@ -69,7 +71,79 @@ function configuredOrEmpty(cfg: vscode.WorkspaceConfiguration, key: string): str
 }
 
 function looksLikeStaleDevPath(p: string): boolean {
-  return /\/home\/zyh110206\//.test(p) || /\\Users\\zyh110206\\/i.test(p);
+  // Known old machine homes + generic "other user's home that isn't ours"
+  if (/\/home\/zyh110206\//.test(p) || /\\Users\\zyh110206\\/i.test(p)) {
+    return true;
+  }
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  if (home && p.startsWith("/home/")) {
+    const m = p.match(/^\/home\/([^/]+)\//);
+    if (m && home.startsWith("/home/") && !p.startsWith(home.replace(/\/$/, "") + "/") && !p.startsWith(home)) {
+      // Path under a different Linux username than current HOME
+      const myUser = home.split("/")[2];
+      if (myUser && m[1] !== myUser) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+const PATH_KEYS = ["sdkPath", "backendPath", "winPython"] as const;
+
+/**
+ * Clear Workspace + Global configured paths that look like another machine.
+ * Returns number of keys cleared.
+ */
+export async function clearStaleConfiguredPaths(): Promise<number> {
+  const cfg = vscode.workspace.getConfiguration("ws63");
+  let n = 0;
+  for (const key of PATH_KEYS) {
+    const inspect = cfg.inspect<string>(key);
+    for (const [value, target] of [
+      [inspect?.workspaceValue, vscode.ConfigurationTarget.Workspace],
+      [inspect?.globalValue, vscode.ConfigurationTarget.Global],
+      [inspect?.workspaceFolderValue, vscode.ConfigurationTarget.WorkspaceFolder],
+    ] as const) {
+      if (typeof value === "string" && value.trim() && looksLikeStaleDevPath(value)) {
+        await cfg.update(key, "", target);
+        n++;
+      }
+    }
+    // Also clear if configured path no longer exists on disk
+    const raw = (cfg.get<string>(key, "") || "").trim();
+    if (raw && !looksLikeStaleDevPath(raw)) {
+      if (key === "sdkPath" && !hasBuildPy(raw)) {
+        await cfg.update(key, "", vscode.ConfigurationTarget.Workspace);
+        n++;
+      }
+      if (key === "backendPath" && !pathExists(path.join(raw, "ws63_cli.py"))) {
+        await cfg.update(key, "", vscode.ConfigurationTarget.Workspace);
+        n++;
+      }
+    }
+  }
+  return n;
+}
+
+/** On activate: auto-clear stale absolute paths so换机不翻车. */
+export async function migratePathsOnActivate(): Promise<void> {
+  const n = await clearStaleConfiguredPaths();
+  if (n > 0) {
+    void vscode.window
+      .showWarningMessage(
+        `WS63: cleared ${n} stale absolute path(s) from a previous machine. Run Setup / Doctor.`,
+        "Setup",
+        "Doctor"
+      )
+      .then((c) => {
+        if (c === "Setup") {
+          void vscode.commands.executeCommand("ws63.setup");
+        } else if (c === "Doctor") {
+          void vscode.commands.executeCommand("ws63.doctor");
+        }
+      });
+  }
 }
 
 function pathExists(p: string): boolean {

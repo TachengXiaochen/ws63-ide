@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import { isRemoteShell, runCaptured } from "../executor/shell";
+import { detectHostMode, hostModeLabel, probeWslWrap } from "../host/adapter";
+import { backendClient } from "../host/backendClient";
 import { cliPath, firmwareAbs, getSettings } from "../settings";
 import {
   DoctorCheck,
@@ -9,46 +10,109 @@ import {
   hintForCode,
 } from "./types";
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
 export async function runDoctorReport(): Promise<DoctorReport> {
   const s = getSettings();
-  const args = [
-    `python3 ${shellQuote(cliPath(s))} doctor`,
-    `--format json`,
-  ];
-  if (s.sdkPath) {
-    args.push(`--sdk ${shellQuote(s.sdkPath)}`);
-  }
-  if (s.port) {
-    args.push(`-p ${shellQuote(s.port)}`);
-  }
-  if (s.firmwareRel) {
-    args.push(`--firmware-rel ${shellQuote(s.firmwareRel)}`);
-  }
-  if (s.target) {
-    args.push(`--target ${shellQuote(s.target)}`);
-  }
-  if (s.winPython) {
-    args.push(`--win-python ${shellQuote(s.winPython)}`);
-  }
-
-  const result = await runCaptured(args.join(" "));
+  const result = await backendClient.doctor({
+    sdk: s.sdkPath,
+    port: s.port,
+    firmwareRel: s.firmwareRel,
+    target: s.target,
+    winPython: s.winPython,
+  });
   const raw = (result.stdout || "").trim();
+  let report: DoctorReport | undefined;
   try {
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
     if (start >= 0 && end > start) {
-      return JSON.parse(raw.slice(start, end + 1)) as DoctorReport;
+      report = JSON.parse(raw.slice(start, end + 1)) as DoctorReport;
     }
   } catch {
     /* fall through */
   }
 
-  // Local fallback if CLI failed hard
-  return localFallbackReport(result.stderr || result.stdout || "doctor CLI failed");
+  if (!report) {
+    report = localFallbackReport(result.stderr || result.stdout || "doctor CLI failed");
+  }
+
+  // Extension-side host / stale checks (CLI may not see VS Code settings)
+  report.checks = [...ideHostChecks(), ...report.checks];
+  recomputeSummary(report);
+  return report;
+}
+
+function ideHostChecks(): DoctorCheck[] {
+  const s = getSettings();
+  const checks: DoctorCheck[] = [];
+  const mode = detectHostMode();
+
+  checks.push({
+    id: "ide_host",
+    status: mode === "wsl-wrap" ? "warn" : "ok",
+    message: `IDE host: ${hostModeLabel()}`,
+    value: mode,
+    fix:
+      mode === "wsl-wrap"
+        ? "Prefer Cursor/VS Code Remote-WSL attached to the Ubuntu distro (main supported path)."
+        : "",
+    code: mode === "wsl-wrap" ? "STALE_PATH" : undefined,
+  });
+
+  if (mode === "wsl-wrap") {
+    const probe = probeWslWrap();
+    checks.push({
+      id: "wsl_wrap",
+      status: probe.ok ? "ok" : "fail",
+      message: probe.ok ? "wsl.exe wrap OK" : "wsl.exe wrap failed",
+      value: probe.detail,
+      fix: probe.ok
+        ? ""
+        : "Install WSL, set ws63.wslDistro, or switch to Remote-WSL.",
+      code: probe.ok ? undefined : "UNKNOWN",
+    });
+  }
+
+  const cfgKeys: Array<{ key: string; val: string }> = [
+    { key: "sdkPath", val: s.sdkPath },
+    { key: "backendPath", val: s.backendPath },
+    { key: "winPython", val: s.winPython },
+  ];
+  for (const { key, val } of cfgKeys) {
+    if (!val) {
+      continue;
+    }
+    if (/\/home\/zyh110206\//.test(val) || /\\Users\\zyh110206\\/i.test(val)) {
+      checks.push({
+        id: `stale_${key}`,
+        status: "fail",
+        message: `Stale absolute ${key} from another machine`,
+        value: val,
+        fix: "Doctor → Clear stale paths, or empty the setting and reopen SDK workspace.",
+        code: "STALE_PATH",
+      });
+    }
+  }
+
+  if (s.sdkPath && !fs.existsSync(path.join(s.sdkPath, "build.py"))) {
+    checks.push({
+      id: "sdk_exists",
+      status: "fail",
+      message: "sdkPath does not contain build.py on this machine",
+      value: s.sdkPath,
+      fix: hintForCode("SDK_INVALID"),
+      code: "SDK_INVALID",
+    });
+  }
+
+  return checks;
+}
+
+function recomputeSummary(report: DoctorReport): void {
+  const fail = report.checks.filter((c) => c.status === "fail").length;
+  const warn = report.checks.filter((c) => c.status === "warn").length;
+  const ok = report.checks.filter((c) => c.status === "ok").length;
+  report.summary = { ok, warn, fail };
+  report.overall = fail ? "fail" : warn ? "warn" : "ok";
 }
 
 function localFallbackReport(reason: string): DoctorReport {
@@ -65,7 +129,7 @@ function localFallbackReport(reason: string): DoctorReport {
     fix: backendOk ? "" : hintForCode("BACKEND_MISSING"),
   });
 
-  const sdkOk = s.sdkPath && fs.existsSync(path.join(s.sdkPath, "build.py"));
+  const sdkOk = !!(s.sdkPath && fs.existsSync(path.join(s.sdkPath, "build.py")));
   checks.push({
     id: "sdk",
     status: sdkOk ? "ok" : "fail",
@@ -101,7 +165,6 @@ export interface PreflightResult {
   fix?: string;
 }
 
-/** Blocking checks before Flash. */
 export async function preflightFlash(): Promise<PreflightResult> {
   const s = getSettings();
   if (!fs.existsSync(cliPath(s))) {
@@ -149,10 +212,26 @@ export async function preflightFlash(): Promise<PreflightResult> {
       fix: ports.fix || hintForCode("PORT_MISSING"),
     };
   }
-  return { ok: true, message: "Flash preflight OK" };
+  const stale = report.checks.find((c) => c.code === "STALE_PATH" && c.status === "fail");
+  if (stale) {
+    return {
+      ok: false,
+      code: "STALE_PATH",
+      message: stale.message,
+      fix: stale.fix || hintForCode("STALE_PATH"),
+    };
+  }
+  if (!s.port) {
+    return {
+      ok: false,
+      code: "PORT_MISSING",
+      message: "No serial port configured",
+      fix: hintForCode("PORT_MISSING"),
+    };
+  }
+  return { ok: true, message: "ok" };
 }
 
-/** Blocking checks before Monitor / Debug Console. */
 export async function preflightSerial(): Promise<PreflightResult> {
   const s = getSettings();
   if (!fs.existsSync(cliPath(s))) {
@@ -163,64 +242,61 @@ export async function preflightSerial(): Promise<PreflightResult> {
       fix: hintForCode("BACKEND_MISSING"),
     };
   }
-
+  if (!s.port) {
+    return {
+      ok: false,
+      code: "PORT_MISSING",
+      message: "No serial port configured",
+      fix: hintForCode("PORT_MISSING"),
+    };
+  }
   const report = await runDoctorReport();
-  const deps = report.checks.find((c) => c.id === "pyserial");
-  if (deps?.status === "fail") {
+  const pyserial = report.checks.find((c) => c.id === "pyserial");
+  if (pyserial?.status === "fail") {
     return {
       ok: false,
       code: "DEPS_MISSING",
-      message: deps.message,
-      fix: deps.fix || hintForCode("DEPS_MISSING"),
+      message: pyserial.message,
+      fix: pyserial.fix || hintForCode("DEPS_MISSING"),
     };
   }
-  const ports = report.checks.find((c) => c.id === "ports");
-  if (ports?.status === "fail") {
+  const winPy = report.checks.find((c) => c.id === "win_python");
+  if (winPy?.status === "fail" && /^COM/i.test(s.port)) {
     return {
       ok: false,
-      code: (ports.code as ErrorCode) || "PORT_MISSING",
-      message: ports.message,
-      fix: ports.fix || hintForCode("PORT_MISSING"),
+      code: "WIN_PYTHON_MISSING",
+      message: winPy.message,
+      fix: winPy.fix || hintForCode("WIN_PYTHON_MISSING"),
     };
   }
-  if (ports?.status === "warn" && ports.code === "PORT_NONE") {
-    return {
-      ok: false,
-      code: "PORT_NONE",
-      message: ports.message,
-      fix: ports.fix || hintForCode("PORT_NONE"),
-    };
-  }
-  return { ok: true, message: "Serial preflight OK" };
+  return { ok: true, message: "ok" };
+}
+
+export function hasCriticalFailures(report: DoctorReport): boolean {
+  return report.checks.some((c) => c.status === "fail");
 }
 
 export function reportToMarkdown(report: DoctorReport): string {
   const lines = [
     `# WS63 Doctor — ${report.overall.toUpperCase()}`,
     "",
-    `ok=${report.summary.ok} warn=${report.summary.warn} fail=${report.summary.fail}`,
-    `host_remote=${isRemoteShell()}`,
-    `backend=${report.backend_root ?? ""}`,
+    `ok=${report.summary.ok}  warn=${report.summary.warn}  fail=${report.summary.fail}`,
     "",
   ];
   for (const c of report.checks) {
-    const icon = c.status === "ok" ? "[OK]" : c.status === "warn" ? "[WARN]" : "[FAIL]";
-    lines.push(`${icon} ${c.id}: ${c.message}`);
+    const icon = c.status === "ok" ? "✓" : c.status === "warn" ? "!" : "✗";
+    lines.push(`## [${icon}] ${c.id} — ${c.status}`);
+    lines.push(c.message);
     if (c.value) {
-      lines.push(`       value: ${c.value}`);
+      lines.push(`value: ${c.value}`);
     }
     if (c.fix) {
-      lines.push(`       fix: ${c.fix}`);
+      lines.push(`fix: ${c.fix}`);
     }
+    if (c.code) {
+      lines.push(`code: ${c.code}`);
+    }
+    lines.push("");
   }
-  lines.push("");
   return lines.join("\n");
-}
-
-export function hasCriticalFailures(report: DoctorReport): boolean {
-  return report.checks.some(
-    (c) =>
-      c.status === "fail" &&
-      ["backend", "sdk", "ws63flash", "pyserial"].includes(c.id)
-  );
 }

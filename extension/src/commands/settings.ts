@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { detectSdkPath, getSettings } from "../settings";
-import { runCaptured } from "../executor/shell";
+import { backendClient } from "../host/backendClient";
 
 type FieldKey =
   | "sdkPath"
@@ -330,6 +330,30 @@ async function pickTarget(prev: string): Promise<string | undefined> {
   return picked.id;
 }
 
+/** Status-bar / command: pick target and persist to workspace settings. */
+export async function selectTarget(): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration("ws63");
+  const prev = cfg.get<string>("target", "ws63-liteos-app") || "ws63-liteos-app";
+  const next = await pickTarget(prev);
+  if (!next || next === prev) {
+    return;
+  }
+  await cfg.update("target", next, vscode.ConfigurationTarget.Workspace);
+  const fw = cfg.get<string>("firmwareRel", "");
+  if (fw && fw.includes(prev) && !fw.includes(next)) {
+    const suggested = fw.replace(new RegExp(prev.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), next);
+    const apply = await vscode.window.showInformationMessage(
+      `Target → ${next}. Update firmware path to match?`,
+      "Update firmwareRel",
+      "Keep"
+    );
+    if (apply === "Update firmwareRel") {
+      await cfg.update("firmwareRel", suggested, vscode.ConfigurationTarget.Workspace);
+    }
+  }
+  vscode.window.showInformationMessage(`WS63 target set to ${next}`);
+}
+
 function discoverTargets(sdk: string): string[] {
   const set = new Set<string>(DEFAULT_TARGETS);
   if (!sdk) {
@@ -514,10 +538,7 @@ async function pickWinPython(prev: string): Promise<string | undefined> {
 }
 
 async function detectWinPythonQuick(): Promise<string> {
-  const s = getSettings();
-  const result = await runCaptured(
-    `python3 -c "import sys; sys.path.insert(0, '${s.backendPath.replace(/'/g, `'\\''`)}'); from portio.win_python import detect_win_python; print(detect_win_python() or '')"`
-  );
+  const result = await backendClient.detectWinPython();
   return (result.stdout || "").trim().split("\n").pop() || "";
 }
 

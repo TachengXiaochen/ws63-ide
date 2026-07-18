@@ -21,7 +21,7 @@ export class Ws63TreeProvider implements vscode.TreeDataProvider<Ws63TreeItem> {
     const s = getSettings();
     return [
       section("Device", SidebarIcons.sectionDevice, [
-        infoItem("Target", s.target, SidebarIcons.target),
+        actionItem("Target", "ws63.selectTarget", SidebarIcons.target, s.target),
         actionItem("Port", "ws63.selectPort", SidebarIcons.port, s.port),
         infoItem("SDK", s.sdkPath, SidebarIcons.sdk),
         infoItem("Firmware", firmwareAbs(s), SidebarIcons.firmware),
@@ -32,11 +32,13 @@ export class Ws63TreeProvider implements vscode.TreeDataProvider<Ws63TreeItem> {
         actionItem("Build (Clean)", "ws63.build"),
         actionItem("Clean Output", "ws63.cleanOutput"),
         actionItem("Flash", "ws63.flash"),
+        actionItem("Multi Flash", "ws63.flashMulti"),
         actionItem("Monitor", "ws63.monitor"),
+        actionItem("Multi Monitor", "ws63.monitorMulti"),
         actionItem("Debug Console", "ws63.debugConsole"),
         actionItem("Send Serial Command", "ws63.sendSerial"),
         actionItem("Build + Flash + Monitor", "ws63.buildFlashMonitor"),
-        actionItem("Stop Build/Flash", "ws63.stop"),
+        actionItem("Stop", "ws63.stop"),
       ]),
       section("Advanced", SidebarIcons.sectionAdvanced, [
         actionItem("Doctor (Diagnose)", "ws63.doctor"),

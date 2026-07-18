@@ -13,6 +13,8 @@
 | [M6-sdk-config-webview.md](./M6-sdk-config-webview.md) | SDK Config Webview 0.4.0 | ✅ |
 | [M7-doctor-flash-monitor.md](./M7-doctor-flash-monitor.md) | Doctor/Setup + Flash/Monitor 加固 0.5.0 | ✅ |
 | — | Settings 选择器 + COM-on-Linux 提示 0.5.1；Doctor 语法修复 + 发版冒烟 0.5.2 | ✅ |
-| M8-sdk-config-full-tree.md | choice / 优化 | 待办 |
+| [M8-M9-p0-batch-monitor-flash.md](./M8-M9-p0-batch-monitor-flash.md) | P0：多路 Flash/Monitor、颜色、Config choice、CI、0.6.0 | ✅ |
+| [M10-host-adapter-migrate.md](./M10-host-adapter-migrate.md) | HostAdapter/BackendClient、换机路径、失败可恢复、0.6.1 | ✅ |
 
-开发请先读：[DEVELOPMENT_GUIDE.md](../DEVELOPMENT_GUIDE.md)
+开发请先读：[DEVELOPMENT_GUIDE.md](../DEVELOPMENT_GUIDE.md)  
+总计划：[PLAN.md](../PLAN.md)

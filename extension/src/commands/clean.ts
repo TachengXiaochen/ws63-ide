@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { getSettings } from "../settings";
-import { runCaptured } from "../executor/shell";
+import { backendClient } from "../host/backendClient";
+import { runStreamingSpec } from "../executor/stream";
 
 /** Remove target build output directory (same as build.py -c pre-step, without compiling). */
 export async function runCleanOutput(): Promise<void> {
@@ -16,8 +17,11 @@ export async function runCleanOutput(): Promise<void> {
     return;
   }
 
-  const cmd = `rm -rf '${outputDir.replace(/'/g, `'\\''`)}' && echo 'Cleaned: ${outputDir}'`;
-  const result = await runCaptured(cmd);
+  const result = await runStreamingSpec({
+    file: "rm",
+    args: ["-rf", outputDir],
+    cwd: s.sdkPath,
+  });
   if (result.code === 0) {
     vscode.window.showInformationMessage(`WS63: cleaned ${s.target} output`);
   } else {

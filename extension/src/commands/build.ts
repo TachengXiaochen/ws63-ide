@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { BuildLogPresenter } from "../executor/logPresenter";
 import { BuildProgressTracker } from "../executor/progressTracker";
-import { runStreaming } from "../executor/stream";
+import { runStreamingSpec } from "../executor/stream";
 import {
   beginTask,
   logBuildLine,
@@ -11,15 +11,30 @@ import {
   logSuccess,
   logTailLine,
 } from "../output/channel";
+import {
+  clearBuildDiagnostics,
+  publishBuildDiagnostics,
+} from "../output/diagnostics";
 import { ProgressPanel } from "../ui/progressPanel";
 import { getSettings } from "../settings";
+import { backendClient } from "../host/backendClient";
+import { argvToShell } from "../host/adapter";
+import { offerRecovery } from "../diagnose/recover";
 
 export async function runBuild(clean: boolean): Promise<number> {
   const s = getSettings();
-  const flag = clean ? "-c" : "";
-  const cmd = `cd ${s.sdkPath} && ./build.py ${flag} ${s.target}`.replace(/\s+/g, " ").trim();
+  let spec;
+  try {
+    spec = backendClient.build(clean);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await offerRecovery("SDK_INVALID", "Build blocked", msg);
+    return 2;
+  }
+
   const title = `WS63 Build (${s.target})`;
   const tracker = new BuildProgressTracker();
+  clearBuildDiagnostics();
 
   ProgressPanel.get().show(title);
   ProgressPanel.get().update({
@@ -37,12 +52,12 @@ export async function runBuild(clean: boolean): Promise<number> {
       cancellable: true,
     },
     async (progress, token) => {
-      beginTask(title, cmd);
+      beginTask(title, argvToShell([spec.file, ...spec.args]));
       const presenter = new BuildLogPresenter();
 
       progress.report({ message: "starting..." });
 
-      const result = await runStreaming(cmd, {
+      const result = await runStreamingSpec(spec, {
         token,
         onLine(line, stream) {
           const prog = presenter.parseProgress(line);
@@ -80,6 +95,10 @@ export async function runBuild(clean: boolean): Promise<number> {
         ProgressPanel.get().finish("success", "编译成功", s.target);
         vscode.window.showInformationMessage(`WS63: Build succeeded (${s.target})`);
       } else {
+        const n = publishBuildDiagnostics(
+          `${result.stdout}\n${result.stderr}`,
+          s.sdkPath
+        );
         logFailure(`Build failed (code ${result.code})`);
         ProgressPanel.get().finish("error", "编译失败", `退出码 ${result.code}`);
         const tail = [...result.stdout.split("\n"), ...result.stderr.split("\n")]
@@ -89,7 +108,11 @@ export async function runBuild(clean: boolean): Promise<number> {
           logSection("last lines (full log tail)");
           tail.forEach((l) => logTailLine(l));
         }
-        vscode.window.showErrorMessage(`WS63: Build failed (code ${result.code})`);
+        vscode.window.showErrorMessage(
+          n
+            ? `WS63: Build failed — ${n} issue(s) in Problems`
+            : `WS63: Build failed (code ${result.code})`
+        );
       }
       return result.code;
     }
@@ -98,8 +121,26 @@ export async function runBuild(clean: boolean): Promise<number> {
 
 export async function runMenuconfig(): Promise<void> {
   const s = getSettings();
-  const cmd = `cd ${s.sdkPath} && ./build.py menuconfig`;
-  const terminal = vscode.window.createTerminal("WS63 Menuconfig");
+  const warn = await vscode.window.showWarningMessage(
+    "Terminal menuconfig writes the same .config as SDK Configuration Editor. " +
+      "Close SDK Config first to avoid conflicts.",
+    "Open Terminal",
+    "Open SDK Config",
+    "Cancel"
+  );
+  if (warn === "Open SDK Config") {
+    await vscode.commands.executeCommand("ws63.sdkConfig");
+    return;
+  }
+  if (warn !== "Open Terminal") {
+    return;
+  }
+  const { createTerminal, sendSpecToTerminal } = await import("../executor/shell");
+  const terminal = createTerminal("WS63 Menuconfig");
   terminal.show();
-  terminal.sendText(cmd, true);
+  sendSpecToTerminal(terminal, {
+    file: "./build.py",
+    args: ["menuconfig"],
+    cwd: s.sdkPath,
+  });
 }

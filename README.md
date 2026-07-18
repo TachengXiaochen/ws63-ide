@@ -1,10 +1,4 @@
-# ws63-ide
-
-**EN:** VS Code / Cursor extension for HiSilicon WS63 (Hi3863): build, flash, monitor, and visual Kconfig — ESP-IDF-style workflow.
-
-**中文：** 面向海思 WS63（Hi3863）的 VS Code / Cursor 扩展：编译、烧录、串口监视与图形化 Kconfig，对标 ESP-IDF Extension 工作流。
-
----
+# WS63 IDE
 
 WS63（Hi3863）开发工具链，对标 **ESP-IDF Extension** 架构：**后端 CLI + VS Code 扩展 + 未来 Confserver/Webview**。
 

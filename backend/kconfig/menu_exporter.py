@@ -7,7 +7,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from kconfiglib import BOOL, HEX, INT, STRING, TRISTATE, Kconfig, MenuNode
+from kconfiglib import BOOL, HEX, INT, STRING, TRISTATE, Choice, Kconfig, MenuNode
 
 from kconfig.env import apply_kconfig_env
 
@@ -33,6 +33,18 @@ def _node_title(node: MenuNode) -> str:
     return "Menu"
 
 
+def _choice_members(node: MenuNode) -> List[str]:
+    members: List[str] = []
+    child = node.list
+    while child:
+        if hasattr(child.item, "name") and getattr(child.item, "name", None):
+            name = child.item.name
+            if name not in ("y", "n", "m", "MODULES"):
+                members.append(name)
+        child = child.next
+    return members
+
+
 def _export_menu_node(kconf: Kconfig, node: MenuNode, path: str) -> Optional[Dict[str, Any]]:
     children: List[Dict[str, Any]] = []
     child = node.list
@@ -42,6 +54,20 @@ def _export_menu_node(kconf: Kconfig, node: MenuNode, path: str) -> Optional[Dic
             children.append(exported)
         child = child.next
 
+    if isinstance(node.item, Choice):
+        title = _node_title(node)
+        members = _choice_members(node)
+        choice_id = _slug(f"{path}-choice-{title}", f"choice-{id(node)}")
+        return {
+            "id": choice_id,
+            "kind": "choice",
+            "type": "choice",
+            "title": title,
+            "help": node.help or "",
+            "members": members,
+            "children": children,
+        }
+
     if hasattr(node.item, "name") and getattr(node.item, "name", None):
         sym = node.item
         if sym.name in ("y", "n", "m", "MODULES"):
@@ -49,10 +75,12 @@ def _export_menu_node(kconf: Kconfig, node: MenuNode, path: str) -> Optional[Dic
         entry: Dict[str, Any] = {
             "id": sym.name,
             "kind": "config",
-            "type": "choice" if sym.choice else TYPE_NAMES.get(sym.orig_type, "unknown"),
+            "type": TYPE_NAMES.get(sym.orig_type, "unknown"),
             "title": _node_title(node),
             "help": node.help or "",
         }
+        if sym.choice is not None:
+            entry["inChoice"] = True
         if children:
             entry["children"] = children
         return entry

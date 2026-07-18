@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  extension:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npm run compile
+      - run: npm run sync-backend
+      - run: npx vsce package --no-dependencies
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ws63-ide-vsix
+          path: extension/*.vsix
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r backend/requirements.txt
+      - run: python3 -m py_compile backend/ws63_cli.py backend/portio/colors.py backend/flash/flasher.py
+      - name: colorize smoke
+        working-directory: backend
+        run: |
+          python3 - <<'PY'
+          from portio.colors import colorize_line
+          s = colorize_line("[SLE_LENET_A] hello")
+          assert "\033[90m" not in s, "must not use dark gray"
+          assert "\033[" in s
+          print("ok")
+          PY
